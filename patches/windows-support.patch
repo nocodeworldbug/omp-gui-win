@@ -1,9 +1,9 @@
 diff --git a/electron-builder.win.yml b/electron-builder.win.yml
 new file mode 100644
-index 0000000..c3b5911
+index 0000000..f711f5b
 --- /dev/null
 +++ b/electron-builder.win.yml
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,51 @@
 +appId: sh.omp.gui
 +productName: omp
 +directories:
@@ -20,6 +20,11 @@ index 0000000..c3b5911
 +compression: maximum
 +
 +win:
++  # latest.yml's file url is derived from this name. The default NSIS name has
++  # a space ("omp Setup 0.9.8.exe"); gh uploads that asset as
++  # "omp.Setup.0.9.8.exe", so the updater would then download a 404. A
++  # space-free ASCII name keeps artifact == release asset == latest.yml url.
++  artifactName: ${productName}-Setup-${version}.${ext}
 +  # electron-builder converts this 1024px PNG into the multi-size .ico it needs,
 +  # so the repo carries no checked-in .ico (upstream ships only .icns/.png).
 +  icon: resources/icon.png

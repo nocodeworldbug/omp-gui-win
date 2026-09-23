@@ -274,10 +274,19 @@ jobs:
           grep -q "owner: nocodeworldbug" "$update_yml"
           grep -q "repo: omp-gui-win" "$update_yml"
 
-          # latest.yml is the manifest electron-updater fetches from the release;
-          # without it the feed answers 404 even when the URL is right.
+          # latest.yml is the manifest electron-updater fetches from the release.
+          # The file it names must exist on disk with exactly that name, or the
+          # updater's download 404s (electron-builder's default NSIS name has a
+          # space, which gh then rewrites on the uploaded asset).
           test -s dist/latest.yml
           cat dist/latest.yml
+          want=$(sed -n "s/^path: //p" dist/latest.yml)
+          echo "updater will fetch: ${want}"
+          test -n "${want}"
+          test -s "dist/${want}"
+          case "${want}" in
+            *[[:space:]]*) echo "artifact name must not contain a space"; exit 1;;
+          esac
 
       - uses: actions/upload-artifact@v4
         with:
@@ -317,7 +326,7 @@ jobs:
           | patch layer | \`patches/windows-support.patch\` |
 
           Assets:
-          - \`omp Setup ${version}.exe\` - NSIS installer (per-user, pickable install dir)
+          - \`omp-Setup-${version}.exe\` - NSIS installer (per-user, pickable install dir)
           - \`omp-${version}-portable.exe\` - single-file portable build
           - \`latest.yml\` - update manifest the installed app polls
 
