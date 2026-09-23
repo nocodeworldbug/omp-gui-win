@@ -240,6 +240,7 @@ jobs:
 
       - name: Package Windows installers
         working-directory: ${{ runner.temp }}/omp/packages/gui
+        shell: bash
         run: >-
           bunx electron-builder --config electron-builder.win.yml --win --publish never
           -c.electronVersion=${{ steps.electron.outputs.version }}
