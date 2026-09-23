@@ -264,12 +264,28 @@ jobs:
           echo "locales packaged: $locale_count"
           test "$locale_count" -gt 5
 
+          # Guard: the in-app updater reads resources/app-update.yml, which
+          # electron-builder fills from the `publish` block. It must point here,
+          # not at upstream, or every update check 404s on a latest.yml that
+          # upstream never ships for Windows.
+          update_yml=dist/win-unpacked/resources/app-update.yml
+          test -f "$update_yml"
+          cat "$update_yml"
+          grep -q "owner: nocodeworldbug" "$update_yml"
+          grep -q "repo: omp-gui-win" "$update_yml"
+
+          # latest.yml is the manifest electron-updater fetches from the release;
+          # without it the feed answers 404 even when the URL is right.
+          test -s dist/latest.yml
+          cat dist/latest.yml
+
       - uses: actions/upload-artifact@v4
         with:
           name: omp-windows-${{ needs.resolve.outputs.tag }}
           path: |
             ${{ runner.temp }}/omp/packages/gui/dist/*.exe
             ${{ runner.temp }}/omp/packages/gui/dist/*.blockmap
+            ${{ runner.temp }}/omp/packages/gui/dist/latest.yml
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -303,6 +319,10 @@ jobs:
           Assets:
           - \`omp Setup ${version}.exe\` - NSIS installer (per-user, pickable install dir)
           - \`omp-${version}-portable.exe\` - single-file portable build
+          - \`latest.yml\` - update manifest the installed app polls
+
+          The in-app updater reads this repository's releases: an installed build
+          keeps checking here and offers the next version as soon as it appears.
 
           The build is unsigned, so SmartScreen may warn on first launch (More info -> Run anyway).
           EOF
@@ -311,4 +331,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "omp for Windows ${TAG}" \
             --notes-file notes.md \
-            ./*.exe ./*.blockmap
+            ./*.exe ./*.blockmap ./latest.yml

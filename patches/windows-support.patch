@@ -1,9 +1,9 @@
 diff --git a/electron-builder.win.yml b/electron-builder.win.yml
 new file mode 100644
-index 0000000..d79805c
+index 0000000..c3b5911
 --- /dev/null
 +++ b/electron-builder.win.yml
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,46 @@
 +appId: sh.omp.gui
 +productName: omp
 +directories:
@@ -37,6 +37,16 @@ index 0000000..d79805c
 +  createDesktopShortcut: true
 +  createStartMenuShortcut: true
 +  shortcutName: omp
++
++# Upstream's electron-builder.yml points the updater at nornzach/oh-my-pi-gui,
++# which ships no latest.yml for Windows, so every in-app update check 404s.
++# electron-builder turns this into resources/app-update.yml (the feed the
++# installed app reads) and emits latest.yml next to the installers; the release
++# is still created by the workflow (--publish never uploads nothing).
++publish:
++  provider: github
++  owner: nocodeworldbug
++  repo: omp-gui-win
 +
 +portable:
 +  artifactName: ${productName}-${version}-portable.${ext}
