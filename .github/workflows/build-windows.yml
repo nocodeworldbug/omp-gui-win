@@ -164,22 +164,19 @@ jobs:
           # The patch and the upstream sources are LF. A Windows checkout can
           # hand us the patch with CRLF (see .gitattributes), which makes every
           # context line carry a trailing CR and match nothing, so normalise it
-          # before applying and keep both sides LF.
+          # first and apply with an explicit LF setting.
           patch="$RUNNER_TEMP/windows-support.patch"
           tr -d '\r' < "$GITHUB_WORKSPACE/patches/windows-support.patch" > "$patch"
-          echo "patch: $(wc -l < "$patch") lines, CR lines: $(grep -c $'\r' "$patch" || true)"
-          head -3 "$patch"
+          wc -l "$patch"
 
           # --3way so an upstream edit nearby still applies; a real conflict
-          # fails the job with the offending hunks printed below.
+          # fails the job and prints the hunks that did not match.
           if ! git -c core.autocrlf=false apply --3way -v "$patch"; then
-            echo "::group::patch application diagnostics"
+            echo "patch application failed, diagnostics follow"
             git --version
-            echo "core.autocrlf(local)=$(git config --get core.autocrlf || echo unset)"
-            echo "core.autocrlf(system)=$(git config --system --get core.autocrlf || echo unset)"
+            git config --get core.autocrlf || true
             git status --short | head -20
             git apply --check -v "$patch" || true
-            echo "::endgroup::"
             exit 1
           fi
           git --no-pager diff --stat
@@ -262,7 +259,9 @@ jobs:
           # names, so a Windows config listing "en" deletes every *.pak.
           test -d dist/win-unpacked/locales
           test -f dist/win-unpacked/locales/en-US.pak
-          test "$(ls dist/win-unpacked/locales | wc -l)" -gt 5
+          locale_count=$(ls dist/win-unpacked/locales | wc -l)
+          echo "locales packaged: $locale_count"
+          test "$locale_count" -gt 5
 
       - uses: actions/upload-artifact@v4
         with:
