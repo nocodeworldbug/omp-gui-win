@@ -143,12 +143,14 @@ jobs:
           GUI_REF: ${{ needs.resolve.outputs.gui_ref }}
         run: |
           set -euo pipefail
+          # LF working tree: the Windows patch is line-ending sensitive.
+          GIT="git -c core.autocrlf=false -c core.eol=lf"
           mkdir -p "$RUNNER_TEMP/gui"
-          git -C "$RUNNER_TEMP/gui" init --quiet
-          git -C "$RUNNER_TEMP/gui" remote add origin https://github.com/nornzach/oh-my-pi-gui.git
+          $GIT -C "$RUNNER_TEMP/gui" init --quiet
+          $GIT -C "$RUNNER_TEMP/gui" remote add origin https://github.com/nornzach/oh-my-pi-gui.git
           # fetch the exact ref shallowly: branch, tag or sha all work
-          git -C "$RUNNER_TEMP/gui" fetch --quiet --depth 1 origin "$GUI_REF"
-          git -C "$RUNNER_TEMP/gui" checkout --quiet FETCH_HEAD
+          $GIT -C "$RUNNER_TEMP/gui" fetch --quiet --depth 1 origin "$GUI_REF"
+          $GIT -C "$RUNNER_TEMP/gui" checkout --quiet FETCH_HEAD
           git -C "$RUNNER_TEMP/gui" rev-parse HEAD
 
       - name: Apply the Windows patch layer
@@ -158,9 +160,28 @@ jobs:
           set -euo pipefail
           git config user.email ci@local
           git config user.name ci
-          # --3way so a rebase-free upstream edit nearby still applies; a real
-          # conflict fails the job with the offending hunks printed.
-          git apply --3way -v "$GITHUB_WORKSPACE/patches/windows-support.patch"
+
+          # The patch and the upstream sources are LF. A Windows checkout can
+          # hand us the patch with CRLF (see .gitattributes), which makes every
+          # context line carry a trailing CR and match nothing, so normalise it
+          # before applying and keep both sides LF.
+          patch="$RUNNER_TEMP/windows-support.patch"
+          tr -d '\r' < "$GITHUB_WORKSPACE/patches/windows-support.patch" > "$patch"
+          echo "patch: $(wc -l < "$patch") lines, CR lines: $(grep -c $'\r' "$patch" || true)"
+          head -3 "$patch"
+
+          # --3way so an upstream edit nearby still applies; a real conflict
+          # fails the job with the offending hunks printed below.
+          if ! git -c core.autocrlf=false apply --3way -v "$patch"; then
+            echo "::group::patch application diagnostics"
+            git --version
+            echo "core.autocrlf(local)=$(git config --get core.autocrlf || echo unset)"
+            echo "core.autocrlf(system)=$(git config --system --get core.autocrlf || echo unset)"
+            git status --short | head -20
+            git apply --check -v "$patch" || true
+            echo "::endgroup::"
+            exit 1
+          fi
           git --no-pager diff --stat
 
       - name: Clone agent monorepo

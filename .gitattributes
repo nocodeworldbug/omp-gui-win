@@ -1,0 +1,6 @@
+# Keep every file byte-exact on checkout.
+#
+# patches/windows-support.patch is applied with `git apply` against upstream
+# sources that are LF; if a Windows runner converts this file to CRLF the
+# context lines gain a trailing CR and the patch no longer matches anything.
+* -text
