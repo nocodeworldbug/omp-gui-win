@@ -1,0 +1,293 @@
+# Build omp GUI for Windows from upstream nornzach/oh-my-pi-gui + the small
+# Windows patch layer in patches/, and publish the installers to this repo's
+# Releases. Nothing is built locally - this workflow is the whole product.
+#
+# One-time setup for this repository:
+#   Settings > Actions > General > Workflow permissions
+#     -> "Read and write permissions"  (needed for `gh release create`)
+#   Optional repository variable:
+#     WIN_TRACK_REF=main               (always build the upstream tip instead of
+#                                       the newest upstream release tag)
+#
+# Triggers
+#   schedule        once a day: build the newest upstream *release tag* that has
+#                   no release here yet ("upstream released -> we release").
+#                   Cheap no-op when nothing changed.
+#   push (main)     re-validate the patch layer after the patch itself changes.
+#   workflow_dispatch  build any ref on demand (gui_ref: main / tag / sha).
+#
+# Release tag format: win-<upstream-ref>  (e.g. win-v0.9.8)
+name: build-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      gui_ref:
+        description: "nornzach/oh-my-pi-gui ref to build (branch, tag or sha). Empty = newest upstream release tag."
+        required: false
+        default: ""
+      omp_ref:
+        description: "nornzach/oh-my-pi ref to compile the bundled sidecar from."
+        required: false
+        default: "main"
+      tag_suffix:
+        description: "Appended to the release tag, e.g. .2 -> win-v0.9.8.2"
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - "patches/**"
+      - ".github/workflows/build-windows.yml"
+  schedule:
+    # Once a day: poll for a new upstream release. Cron runs can be queued a few
+    # minutes late, and a run that finds nothing new costs a few seconds.
+    # UTC 20:23 == 04:23 next day in Beijing.
+    - cron: "23 20 * * *"
+
+concurrency:
+  group: build-windows
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    name: Resolve upstream refs
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      gui_ref: ${{ steps.pick.outputs.gui_ref }}
+      omp_ref: ${{ steps.pick.outputs.omp_ref }}
+      skip: ${{ steps.pick.outputs.skip }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          IN_GUI_REF: ${{ inputs.gui_ref }}
+          IN_OMP_REF: ${{ inputs.omp_ref }}
+          IN_SUFFIX: ${{ inputs.tag_suffix }}
+          TRACK_REF: ${{ vars.WIN_TRACK_REF }}
+        run: |
+          set -euo pipefail
+          upstream=https://api.github.com/repos/nornzach/oh-my-pi-gui
+
+          # Ref precedence: the dispatch input, then the repo variable
+          # WIN_TRACK_REF (set it to "main" to always build the upstream tip),
+          # then the newest upstream release tag.
+          if [ -n "${IN_GUI_REF}" ]; then
+            gui_ref="${IN_GUI_REF}"
+          elif [ -n "${TRACK_REF:-}" ]; then
+            gui_ref="${TRACK_REF}"
+          else
+            gui_ref="$(curl -fsSL "${upstream}/releases/latest" | jq -r .tag_name)"
+          fi
+          [ -n "${gui_ref}" ] && [ "${gui_ref}" != "null" ] || { echo "could not resolve an upstream ref"; exit 1; }
+
+          tag="win-${gui_ref}${IN_SUFFIX}"
+
+          skip=false
+          if [ "${EVENT}" = "schedule" ]; then
+            # Only the polling trigger is idempotent; manual/patch runs always rebuild.
+            if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              skip=true
+              echo "release ${tag} already exists, nothing to build"
+            fi
+          elif gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            tag="${tag}-b${RUN_NUMBER}"
+            echo "release tag already taken, using ${tag}"
+          fi
+
+          {
+            echo "gui_ref=${gui_ref}"
+            echo "omp_ref=${IN_OMP_REF:-main}"
+            echo "tag=${tag}"
+            echo "skip=${skip}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build & release
+    needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache bun / electron / electron-builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-deps-${{ hashFiles('patches/windows-support.patch') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      # The GUI repo does not carry the agent: the sidecar is compiled from the
+      # fork monorepo with the GUI checked out at packages/gui (its documented
+      # nested layout), so both checkouts have to meet.
+      - name: Clone upstream GUI
+        shell: bash
+        env:
+          GUI_REF: ${{ needs.resolve.outputs.gui_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gui"
+          git -C "$RUNNER_TEMP/gui" init --quiet
+          git -C "$RUNNER_TEMP/gui" remote add origin https://github.com/nornzach/oh-my-pi-gui.git
+          # fetch the exact ref shallowly: branch, tag or sha all work
+          git -C "$RUNNER_TEMP/gui" fetch --quiet --depth 1 origin "$GUI_REF"
+          git -C "$RUNNER_TEMP/gui" checkout --quiet FETCH_HEAD
+          git -C "$RUNNER_TEMP/gui" rev-parse HEAD
+
+      - name: Apply the Windows patch layer
+        working-directory: ${{ runner.temp }}/gui
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.email ci@local
+          git config user.name ci
+          # --3way so a rebase-free upstream edit nearby still applies; a real
+          # conflict fails the job with the offending hunks printed.
+          git apply --3way -v "$GITHUB_WORKSPACE/patches/windows-support.patch"
+          git --no-pager diff --stat
+
+      - name: Clone agent monorepo
+        shell: bash
+        env:
+          OMP_REF: ${{ needs.resolve.outputs.omp_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/omp"
+          git -C "$RUNNER_TEMP/omp" init --quiet
+          git -C "$RUNNER_TEMP/omp" remote add origin https://github.com/nornzach/oh-my-pi.git
+          git -C "$RUNNER_TEMP/omp" fetch --quiet --depth 1 origin "$OMP_REF"
+          git -C "$RUNNER_TEMP/omp" checkout --quiet FETCH_HEAD
+          git -C "$RUNNER_TEMP/omp" rev-parse HEAD
+
+      - name: Nest the GUI inside the monorepo
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/omp/packages/gui"
+          mv "$RUNNER_TEMP/gui" "$RUNNER_TEMP/omp/packages/gui"
+
+      - name: Install workspace dependencies
+        working-directory: ${{ runner.temp }}/omp
+        run: bun install
+
+      - name: Build the bundled omp sidecar
+        working-directory: ${{ runner.temp }}/omp/packages/gui
+        run: bun scripts/build-bundled-omp.ts --target bun-windows-x64
+
+      - name: Smoke-test the sidecar
+        working-directory: ${{ runner.temp }}/omp/packages/gui
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./resources/omp.exe --version
+          test -s resources/omp.exe
+
+      - name: Build the GUI bundles
+        working-directory: ${{ runner.temp }}/omp/packages/gui
+        run: bun run build
+
+      - name: Resolve the Electron version
+        id: electron
+        working-directory: ${{ runner.temp }}/omp
+        shell: bash
+        run: |
+          set -euo pipefail
+          # package.json pins a range; electron-builder needs a concrete version.
+          version=$(node -e '
+            const fs = require("fs");
+            for (const p of ["node_modules/electron/package.json", "packages/gui/node_modules/electron/package.json"]) {
+              try { console.log(JSON.parse(fs.readFileSync(p, "utf8")).version); process.exit(0); } catch {}
+            }
+            process.exit(1);
+          ')
+          echo "electron=${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Package Windows installers
+        working-directory: ${{ runner.temp }}/omp/packages/gui
+        run: >-
+          bunx electron-builder --config electron-builder.win.yml --win --publish never
+          -c.electronVersion=${{ steps.electron.outputs.version }}
+
+      - name: Inspect the packaged app
+        working-directory: ${{ runner.temp }}/omp/packages/gui
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la dist
+          # the sidecar must be packaged next to app.asar, as omp.exe
+          test -s dist/win-unpacked/resources/omp.exe
+          ./dist/win-unpacked/resources/omp.exe --version
+          # Guard: a locale-less app dir makes Chromium kill the renderer right
+          # after startup ("locale resources are not loaded"), i.e. a broken
+          # product. electronLanguages values are matched against macOS .lproj
+          # names, so a Windows config listing "en" deletes every *.pak.
+          test -d dist/win-unpacked/locales
+          test -f dist/win-unpacked/locales/en-US.pak
+          test "$(ls dist/win-unpacked/locales | wc -l)" -gt 5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omp-windows-${{ needs.resolve.outputs.tag }}
+          path: |
+            ${{ runner.temp }}/omp/packages/gui/dist/*.exe
+            ${{ runner.temp }}/omp/packages/gui/dist/*.blockmap
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          GUI_REF: ${{ needs.resolve.outputs.gui_ref }}
+          OMP_REF: ${{ needs.resolve.outputs.omp_ref }}
+          ELECTRON: ${{ steps.electron.outputs.version }}
+        run: |
+          set -euo pipefail
+          gui_dir="$RUNNER_TEMP/omp/packages/gui"
+          cd "$gui_dir"
+          version=$(node -p "require('./package.json').version")
+          sidecar=$(./resources/omp.exe --version)
+          gui_sha=$(git rev-parse HEAD)
+          omp_sha=$(git -C "$RUNNER_TEMP/omp" rev-parse HEAD)
+
+          cd dist
+          cat > notes.md <<EOF
+          Windows build of omp GUI, compiled from upstream sources by GitHub Actions.
+
+          | | |
+          | --- | --- |
+          | GUI | \`${version}\` - [nornzach/oh-my-pi-gui](https://github.com/nornzach/oh-my-pi-gui) \`${GUI_REF}\` (\`${gui_sha}\`) |
+          | bundled agent | \`${sidecar}\` - [nornzach/oh-my-pi](https://github.com/nornzach/oh-my-pi) \`${OMP_REF}\` (\`${omp_sha}\`) |
+          | Electron | \`${ELECTRON}\` |
+          | patch layer | \`patches/windows-support.patch\` |
+
+          Assets:
+          - \`omp Setup ${version}.exe\` - NSIS installer (per-user, pickable install dir)
+          - \`omp-${version}-portable.exe\` - single-file portable build
+
+          The build is unsigned, so SmartScreen may warn on first launch (More info -> Run anyway).
+          EOF
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "omp for Windows ${TAG}" \
+            --notes-file notes.md \
+            ./*.exe ./*.blockmap

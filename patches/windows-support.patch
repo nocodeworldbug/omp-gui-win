@@ -1,0 +1,174 @@
+diff --git a/electron-builder.win.yml b/electron-builder.win.yml
+new file mode 100644
+index 0000000..d79805c
+--- /dev/null
++++ b/electron-builder.win.yml
+@@ -0,0 +1,36 @@
++appId: sh.omp.gui
++productName: omp
++directories:
++  buildResources: resources
++  output: dist
++files:
++  - out/**/*
++  - "!node_modules/**/*"
++extraResources:
++  # Windows sidecar is `omp.exe`; the main process resolves the .exe suffix.
++  - from: resources/omp.exe
++    to: omp.exe
++asar: true
++compression: maximum
++
++win:
++  # electron-builder converts this 1024px PNG into the multi-size .ico it needs,
++  # so the repo carries no checked-in .ico (upstream ships only .icns/.png).
++  icon: resources/icon.png
++  target:
++    - target: nsis
++      arch: [x64]
++    - target: portable
++      arch: [x64]
++  verifyUpdateCodeSignature: false
++
++nsis:
++  oneClick: false
++  allowToChangeInstallationDirectory: true
++  deleteAppDataOnUninstall: false
++  createDesktopShortcut: true
++  createStartMenuShortcut: true
++  shortcutName: omp
++
++portable:
++  artifactName: ${productName}-${version}-portable.${ext}
+diff --git a/scripts/build-bundled-omp.ts b/scripts/build-bundled-omp.ts
+index 417694e..e9001bf 100644
+--- a/scripts/build-bundled-omp.ts
++++ b/scripts/build-bundled-omp.ts
+@@ -122,19 +122,23 @@ function resolveTarget(): SidecarTarget {
+ 		const platformTag = `${process.platform}-${process.arch}`;
+ 		return {
+ 			platformTag,
+-			out: path.join(guiRoot, "resources", "omp"),
++			out: path.join(guiRoot, "resources", process.platform === "win32" ? "omp.exe" : "omp"),
+ 			addonFilenames: addonFilenamesFor(platformTag),
+ 		};
+ 	}
+-	const match = /^bun-(darwin|linux|win32)-(arm64|x64)(?:-.*)?$/.exec(targetFlag);
++	// Bun spells the Windows compile target `bun-windows-x64` while the natives
++	// platform tag is `win32-x64`; accept both spellings and normalise the tag.
++	const match = /^bun-(darwin|linux|win32|windows)-(arm64|x64)(?:-.*)?$/.exec(targetFlag);
+ 	if (!match) {
+ 		throw new Error(`Unsupported --target '${targetFlag}'. Expected bun-<os>-<arch> (e.g. bun-darwin-x64).`);
+ 	}
+-	const platformTag = `${match[1]}-${match[2]}`;
++	const osName = match[1] === "windows" ? "win32" : match[1];
++	const platformTag = `${osName}-${match[2]}`;
+ 	return {
+ 		target: targetFlag as Bun.Build.CompileTarget,
+ 		platformTag,
+-		out: path.join(guiRoot, "resources", `omp.${match[2]}`),
++		// Windows binaries carry the .exe suffix; the packaged app looks for it.
++		out: path.join(guiRoot, "resources", osName === "win32" ? "omp.exe" : `omp.${match[2]}`),
+ 		addonFilenames: addonFilenamesFor(platformTag),
+ 	};
+ }
+diff --git a/scripts/check-main-bundle.ts b/scripts/check-main-bundle.ts
+index f7abb1c..58e4b4b 100644
+--- a/scripts/check-main-bundle.ts
++++ b/scripts/check-main-bundle.ts
+@@ -8,8 +8,11 @@
+ 
+ import * as fs from "node:fs/promises";
+ import { builtinModules } from "node:module";
++import { fileURLToPath } from "node:url";
+ 
+-const BUNDLE = new URL("../out/main/index.js", import.meta.url).pathname;
++// fileURLToPath, not .pathname: on Windows the latter yields "/C:/..." which
++// every fs call rejects.
++const BUNDLE = fileURLToPath(new URL("../out/main/index.js", import.meta.url));
+ const IMPORT_SPECIFIER = /^\s*(?:import|export)[^\n]*?\sfrom\s+["']([^"']+)["']/gm;
+ 
+ // `original-fs` is not in `builtinModules` but Electron always resolves it: it is
+diff --git a/src/main/index.ts b/src/main/index.ts
+index ede7a49..fa0afab 100644
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -51,29 +51,39 @@ app.setName("omp");
+ 	}
+ }
+ 
++/**
++ * Resolve a sidecar candidate, accepting the platform's `.exe` suffix: Windows
++ * ships the binary as `omp.exe` while mac/linux use a bare `omp`.
++ */
++function resolveOmpCandidate(candidate: string): string | null {
++	if (existsSync(candidate)) return candidate;
++	const exe = `${candidate}.exe`;
++	return existsSync(exe) ? exe : null;
++}
++
+ /**
+  * Locate the GUI's built-in omp binary — the ONLY sidecar the GUI runs in the
+- * closed loop. Packaged apps ship it at `process.resourcesPath/omp`; in dev it
+- * lives at `packages/gui/resources/omp` (built by `bun --cwd=packages/gui run
+- * build:omp`). No system-installed omp is consulted and there is no external
+- * fallback: when it is missing the GUI surfaces an error telling the user to
+- * build it. The workspace source sidecar is available only as an explicit dev
+- * override (`OMP_SIDECAR=source`), never automatically.
++ * closed loop. Packaged apps ship it at `process.resourcesPath/omp` (`omp.exe`
++ * on Windows); in dev it lives at `packages/gui/resources/omp` (built by `bun
++ * --cwd=packages/gui run build:omp`). No system-installed omp is consulted and
++ * there is no external fallback: when it is missing the GUI surfaces an error
++ * telling the user to build it. The workspace source sidecar is available only
++ * as an explicit dev override (`OMP_SIDECAR=source`), never automatically.
+  */
+ function resolveBundledOmp(): string | null {
+ 	const override = process.env.OMP_BUNDLED_OMP;
+ 	if (override && existsSync(override)) return override;
+ 	if (process.resourcesPath) {
+-		const packaged = join(process.resourcesPath, "omp");
+-		if (existsSync(packaged)) return packaged;
++		const packaged = resolveOmpCandidate(join(process.resourcesPath, "omp"));
++		if (packaged) return packaged;
+ 	}
+ 	for (const start of [app.getAppPath(), process.cwd()]) {
+ 		let dir = start;
+ 		for (let i = 0; i < 8; i++) {
+-			const direct = join(dir, "resources", "omp");
+-			if (existsSync(direct)) return direct;
+-			const nested = join(dir, "packages", "gui", "resources", "omp");
+-			if (existsSync(nested)) return nested;
++			const direct = resolveOmpCandidate(join(dir, "resources", "omp"));
++			if (direct) return direct;
++			const nested = resolveOmpCandidate(join(dir, "packages", "gui", "resources", "omp"));
++			if (nested) return nested;
+ 			const parent = join(dir, "..");
+ 			if (parent === dir) break;
+ 			dir = parent;
+diff --git a/src/main/sidecar.ts b/src/main/sidecar.ts
+index 6b0b279..bc48a18 100644
+--- a/src/main/sidecar.ts
++++ b/src/main/sidecar.ts
+@@ -241,6 +241,8 @@ export class SidecarManager extends EventEmitter {
+ 					PI_NOTIFICATIONS: "off",
+ 				},
+ 				cwd,
++				// Windows would otherwise flash a console window behind the GUI.
++				windowsHide: true,
+ 			});
+ 		} catch (err) {
+ 			// spawn() throws synchronously (EBADF/ENOENT) — surface it as a
+diff --git a/src/main/window.ts b/src/main/window.ts
+index fb03781..d81f1dc 100644
+--- a/src/main/window.ts
++++ b/src/main/window.ts
+@@ -108,6 +108,9 @@ export class WindowManager {
+ 			minWidth: MIN_WIDTH,
+ 			minHeight: MIN_HEIGHT,
+ 			show: false,
++			// Windows otherwise paints File/Edit/View under the title bar; keep the
++			// menu for its accelerators and let Alt reveal it.
++			autoHideMenuBar: process.platform === "win32",
+ 			webPreferences: {
+ 				contextIsolation: true,
+ 				nodeIntegration: false,
