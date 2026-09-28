@@ -315,6 +315,12 @@ jobs:
           omp_sha=$(git -C "$RUNNER_TEMP/omp" rev-parse HEAD)
 
           cd dist
+          # Name the assets from the artifacts themselves: upstream owns the
+          # electron-builder artifactName templates and renamed them in 0.9.10.
+          setup_exe=$(sed -n "s/^path: //p" latest.yml)
+          portable_files=(./*portable*.exe)
+          portable_exe=$(basename "${portable_files[0]}")
+
           cat > notes.md <<EOF
           Windows build of omp GUI, compiled from upstream sources by GitHub Actions.
 
@@ -324,11 +330,6 @@ jobs:
           | bundled agent | \`${sidecar}\` - [nornzach/oh-my-pi](https://github.com/nornzach/oh-my-pi) \`${OMP_REF}\` (\`${omp_sha}\`) |
           | Electron | \`${ELECTRON}\` |
           | patch layer | \`patches/windows-support.patch\` |
-
-          # Name the assets from the artifacts themselves: upstream owns the
-          # electron-builder artifactName templates and renamed them in 0.9.10.
-          setup_exe=$(sed -n "s/^path: //p" latest.yml)
-          portable_exe=$(basename "$(ls ./*portable*.exe | head -1)")
 
           Assets:
           - \`${setup_exe}\` - NSIS installer (per-user, pickable install dir)
