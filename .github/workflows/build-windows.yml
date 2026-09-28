@@ -325,9 +325,14 @@ jobs:
           | Electron | \`${ELECTRON}\` |
           | patch layer | \`patches/windows-support.patch\` |
 
+          # Name the assets from the artifacts themselves: upstream owns the
+          # electron-builder artifactName templates and renamed them in 0.9.10.
+          setup_exe=$(sed -n "s/^path: //p" latest.yml)
+          portable_exe=$(basename "$(ls ./*portable*.exe | head -1)")
+
           Assets:
-          - \`omp-Setup-${version}.exe\` - NSIS installer (per-user, pickable install dir)
-          - \`omp-${version}-portable.exe\` - single-file portable build
+          - \`${setup_exe}\` - NSIS installer (per-user, pickable install dir)
+          - \`${portable_exe}\` - single-file portable build
           - \`latest.yml\` - update manifest the installed app polls
 
           The in-app updater reads this repository's releases: an installed build
