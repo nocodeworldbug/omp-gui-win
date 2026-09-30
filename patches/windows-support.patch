@@ -49,3 +49,117 @@ index 1575c2e..fe4e61b 100644
 +		Menu.setApplicationMenu(null);
 +	}
  }
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 1b08121..dcd3eea 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -3,7 +3,7 @@
+  * All RPC commands delegate to ipcRenderer.invoke(IPC_COMMANDS.RPC_COMMAND, ...).
+  * Event subscriptions return unsubscribe functions.
+  */
+-import { contextBridge, ipcRenderer } from "electron";
++import { contextBridge, ipcRenderer, webUtils } from "electron";
+ import type {
+ 	CustomProviderInput,
+ 	CustomProviderView,
+@@ -270,6 +270,7 @@ const api: OmpApi = {
+ 		showOpenDialog: (filters?: { name: string; extensions: string[] }[], options?: { directory?: boolean }) =>
+ 			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_OPEN_DIALOG, filters, options),
+ 		clipboardRead: () => ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_CLIPBOARD_READ),
++		getPathForFile: (file: File) => webUtils.getPathForFile(file),
+ 		notify: (title: string, body?: string) => {
+ 			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_NOTIFY, { title, body });
+ 		},
+diff --git a/src/renderer/components/chat/MessageBubble.tsx b/src/renderer/components/chat/MessageBubble.tsx
+index 46df15c..97221fe 100644
+--- a/src/renderer/components/chat/MessageBubble.tsx
++++ b/src/renderer/components/chat/MessageBubble.tsx
+@@ -40,12 +40,25 @@ const COMPACTION_METHOD_KEYS: Record<string, string> = {
+ function InlineImage({ image }: { image: ImageContent }) {
+ 	const t = useT();
+ 	const src = `data:${image.mimeType};base64,${image.data}`;
++	const [zoomed, setZoomed] = useState(false);
+ 	return (
+-		<img
+-			src={src}
+-			alt={t("chat.attachedImage")}
+-			className="my-1 max-h-48 max-w-64 rounded-md border border-[var(--omp-border-muted)] object-contain"
+-		/>
++		<>
++			<img
++				src={src}
++				alt={t("chat.attachedImage")}
++				onDoubleClick={() => setZoomed(true)}
++				className="my-1 max-h-48 max-w-64 cursor-zoom-in rounded-md border border-[var(--omp-border-muted)] object-contain"
++			/>
++			{zoomed && (
++				<div
++					className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
++					onClick={() => setZoomed(false)}
++					role="presentation"
++				>
++					<img src={src} alt={t("chat.attachedImage")} className="max-h-full max-w-full rounded-md object-contain" />
++				</div>
++			)}
++		</>
+ 	);
+ }
+ 
+diff --git a/src/renderer/components/layout/InputArea.tsx b/src/renderer/components/layout/InputArea.tsx
+index 8a08bce..96f4a5b 100644
+--- a/src/renderer/components/layout/InputArea.tsx
++++ b/src/renderer/components/layout/InputArea.tsx
+@@ -659,12 +659,37 @@ export function InputArea() {
+ 	};
+ 
+ 	const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+-		const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/"));
+-		if (files.length > 0) {
++		const allFiles = Array.from(e.clipboardData.files);
++		const images = allFiles.filter(f => f.type.startsWith("image/"));
++		if (images.length > 0) {
+ 			e.preventDefault();
+-			void Promise.all(files.map(fileToImage)).then(pasted => setImages(prev => [...prev, ...pasted]));
++			void Promise.all(images.map(fileToImage)).then(pasted => setImages(prev => [...prev, ...pasted]));
+ 			return;
+ 		}
++		// Copied file(s) (non-image): insert each absolute path as an @mention so
++		// it renders inline and submits as a path. Windows Explorer sets no
++		// text/plain for a file copy, so without this the paste is a no-op.
++		if (allFiles.length > 0) {
++			const paths = allFiles
++				.map(f => window.omp.system.getPathForFile(f))
++				.filter((p): p is string => p.length > 0);
++			if (paths.length > 0) {
++				e.preventDefault();
++				const el = textareaRef.current;
++				const start = el?.selectionStart ?? text.length;
++				const end = el?.selectionEnd ?? start;
++				const insert = paths.map(p => `@${p}`).join(" ") + " ";
++				setText(current => `${current.slice(0, start)}${insert}${current.slice(end)}`);
++				requestAnimationFrame(() => {
++					const target = textareaRef.current;
++					if (!target) return;
++					target.focus();
++					const caret = start + insert.length;
++					target.setSelectionRange(caret, caret);
++				});
++				return;
++			}
++		}
+ 		// Large TEXT paste (TUI editor.ts:1996-2044 parity): sanitize, then collapse
+ 		// to a `[Paste #N]` marker past the marker threshold; past the (separate,
+ 		// line-count-only) menu threshold, offer the inline/wrapped choice first.
+diff --git a/src/shared/ipc-types.ts b/src/shared/ipc-types.ts
+index fd3b578..f297eb9 100644
+--- a/src/shared/ipc-types.ts
++++ b/src/shared/ipc-types.ts
+@@ -1160,6 +1160,8 @@ export interface OmpApi {
+ 			options?: { directory?: boolean },
+ 		): Promise<string[] | null>;
+ 		clipboardRead(): Promise<string>;
++		/** Absolute path of a clipboard/dropped File via Electron webUtils; "" when unavailable. */
++		getPathForFile(file: File): string;
+ 		notify(title: string, body?: string): void;
+ 	};
+ 	prefs: {
