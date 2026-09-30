@@ -29,3 +29,23 @@ index f7abb1c..8466d3f 100644
  const IMPORT_SPECIFIER = /^\s*(?:import|export)[^\n]*?\sfrom\s+["']([^"']+)["']/gm;
  
  // `original-fs` is not in `builtinModules` but Electron always resolves it: it is
+diff --git a/src/main/menu.ts b/src/main/menu.ts
+index 1575c2e..fe4e61b 100644
+--- a/src/main/menu.ts
++++ b/src/main/menu.ts
+@@ -196,5 +196,14 @@ export function createMenu(windowManager: WindowManager, spawnWindow: SpawnWindo
+ 		},
+ 	];
+ 
+-	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
++	// Windows: drop the native menu bar entirely. `autoHideMenuBar` keeps a
++	// hidden bar that Alt activates, which steals focus from the composer on
++	// every Alt-based chord (Alt+Shift input-source switching being the common
++	// one) and visibly deselects the input. macOS keeps its menu (the app is
++	// expected to have one, and it owns no focus here).
++	if (process.platform !== "win32") {
++		Menu.setApplicationMenu(Menu.buildFromTemplate(template));
++	} else {
++		Menu.setApplicationMenu(null);
++	}
+ }
