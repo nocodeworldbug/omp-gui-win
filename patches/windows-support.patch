@@ -1,36 +1,20 @@
 diff --git a/electron-builder.win.yml b/electron-builder.win.yml
-index 38b767f..e083968 100644
+index d2303d5..da5a53c 100644
 --- a/electron-builder.win.yml
 +++ b/electron-builder.win.yml
-@@ -42,8 +42,5 @@ portable:
+@@ -42,8 +42,8 @@ portable:
  
  publish:
    provider: github
 -  owner: nornzach
 -  repo: oh-my-pi-gui
--
--electronLanguages:
--  - en
 +  owner: nocodeworldbug
 +  repo: omp-gui-win
-diff --git a/scripts/check-main-bundle.ts b/scripts/check-main-bundle.ts
-index f7abb1c..8466d3f 100644
---- a/scripts/check-main-bundle.ts
-+++ b/scripts/check-main-bundle.ts
-@@ -7,9 +7,10 @@
-  */
  
- import * as fs from "node:fs/promises";
-+import { fileURLToPath } from "node:url";
- import { builtinModules } from "node:module";
- 
--const BUNDLE = new URL("../out/main/index.js", import.meta.url).pathname;
-+const BUNDLE = fileURLToPath(new URL("../out/main/index.js", import.meta.url));
- const IMPORT_SPECIFIER = /^\s*(?:import|export)[^\n]*?\sfrom\s+["']([^"']+)["']/gm;
- 
- // `original-fs` is not in `builtinModules` but Electron always resolves it: it is
+ # NO `electronLanguages` here on purpose: electron-builder's option compares the
+ # list against Electron's `locales/*.pak` basenames with an EXACT match (after
 diff --git a/src/main/ipc.ts b/src/main/ipc.ts
-index 0dceca7..4053171 100644
+index c4d8fc0..d9ec9a4 100644
 --- a/src/main/ipc.ts
 +++ b/src/main/ipc.ts
 @@ -24,6 +24,7 @@ import type {
@@ -41,7 +25,7 @@ index 0dceca7..4053171 100644
  	IpcOpenPathResult,
  	IpcPrefsGetPayload,
  	IpcPrefsSetPayload,
-@@ -826,6 +827,42 @@ export function registerIpcHandlers(deps: IpcDeps): void {
+@@ -854,6 +855,42 @@ export function registerIpcHandlers(deps: IpcDeps): void {
  		return clipboard.readText();
  	});
  
@@ -85,10 +69,10 @@ index 0dceca7..4053171 100644
  		if (typeof payload.title === "string") {
  			// Dedupe within a window (a turn can emit the same notification from
 diff --git a/src/main/menu.ts b/src/main/menu.ts
-index 1575c2e..fe4e61b 100644
+index f4a91a0..a26c583 100644
 --- a/src/main/menu.ts
 +++ b/src/main/menu.ts
-@@ -196,5 +196,14 @@ export function createMenu(windowManager: WindowManager, spawnWindow: SpawnWindo
+@@ -305,5 +305,14 @@ export function createMenu(windowManager: WindowManager, spawnWindow: SpawnWindo
  		},
  	];
  
@@ -105,7 +89,7 @@ index 1575c2e..fe4e61b 100644
 +	}
  }
 diff --git a/src/preload/index.ts b/src/preload/index.ts
-index 1b08121..7de23d9 100644
+index 3a8b30d..51f04ca 100644
 --- a/src/preload/index.ts
 +++ b/src/preload/index.ts
 @@ -3,7 +3,7 @@
@@ -125,7 +109,7 @@ index 1b08121..7de23d9 100644
  	IpcOpenPathResult,
  	IpcSessionOpenNewWindowPayload,
  	IpcSessionOwner,
-@@ -270,9 +271,12 @@ const api: OmpApi = {
+@@ -276,9 +277,12 @@ const api: OmpApi = {
  		showOpenDialog: (filters?: { name: string; extensions: string[] }[], options?: { directory?: boolean }) =>
  			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_OPEN_DIALOG, filters, options),
  		clipboardRead: () => ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_CLIPBOARD_READ),
@@ -139,7 +123,7 @@ index 1b08121..7de23d9 100644
  
  	prefs: {
 diff --git a/src/renderer/components/chat/MessageBubble.tsx b/src/renderer/components/chat/MessageBubble.tsx
-index 46df15c..2cdc9c8 100644
+index e113be0..08d1473 100644
 --- a/src/renderer/components/chat/MessageBubble.tsx
 +++ b/src/renderer/components/chat/MessageBubble.tsx
 @@ -44,7 +44,8 @@ function InlineImage({ image }: { image: ImageContent }) {
@@ -153,10 +137,10 @@ index 46df15c..2cdc9c8 100644
  	);
  }
 diff --git a/src/renderer/components/layout/InputArea.tsx b/src/renderer/components/layout/InputArea.tsx
-index 8a08bce..22d067a 100644
+index dfe0093..d938177 100644
 --- a/src/renderer/components/layout/InputArea.tsx
 +++ b/src/renderer/components/layout/InputArea.tsx
-@@ -659,12 +659,37 @@ export function InputArea() {
+@@ -663,12 +663,37 @@ export function InputArea() {
  	};
  
  	const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -197,7 +181,7 @@ index 8a08bce..22d067a 100644
  		// Large TEXT paste (TUI editor.ts:1996-2044 parity): sanitize, then collapse
  		// to a `[Paste #N]` marker past the marker threshold; past the (separate,
  		// line-count-only) menu threshold, offer the inline/wrapped choice first.
-@@ -851,7 +876,13 @@ export function InputArea() {
+@@ -855,7 +880,13 @@ export function InputArea() {
  											<img
  												src={image.preview}
  												alt={t("input.attachmentAlt", { index: index + 1 })}
@@ -213,10 +197,10 @@ index 8a08bce..22d067a 100644
  											<button
  												type="button"
 diff --git a/src/shared/ipc-types.ts b/src/shared/ipc-types.ts
-index fd3b578..c34604b 100644
+index 261e514..b57b6ea 100644
 --- a/src/shared/ipc-types.ts
 +++ b/src/shared/ipc-types.ts
-@@ -138,6 +138,8 @@ export const IPC_COMMANDS = {
+@@ -144,6 +144,8 @@ export const IPC_COMMANDS = {
  	SYSTEM_CLIPBOARD_READ: "system:clipboard-read",
  	/** Show notification */
  	SYSTEM_NOTIFY: "system:notify",
@@ -225,7 +209,7 @@ index fd3b578..c34604b 100644
  	/** Get GUI preferences */
  	PREFS_GET: "prefs:get",
  	/** Set GUI preferences */
-@@ -636,6 +638,13 @@ export interface IpcFsReadPlanPayload {
+@@ -666,6 +668,13 @@ export interface IpcFsReadPlanPayload {
  	localRoot: string | null;
  }
  
@@ -239,7 +223,7 @@ index fd3b578..c34604b 100644
  export interface IpcFsReadImagePayload {
  	/** Visible tab whose workspace resolves relative paths. */
  	tabId?: string;
-@@ -1160,7 +1169,11 @@ export interface OmpApi {
+@@ -1205,7 +1214,11 @@ export interface OmpApi {
  			options?: { directory?: boolean },
  		): Promise<string[] | null>;
  		clipboardRead(): Promise<string>;
