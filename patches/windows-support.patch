@@ -14,7 +14,7 @@ index d2303d5..da5a53c 100644
  # NO `electronLanguages` here on purpose: electron-builder's option compares the
  # list against Electron's `locales/*.pak` basenames with an EXACT match (after
 diff --git a/src/main/ipc.ts b/src/main/ipc.ts
-index 81db3ee..1041a7c 100644
+index 506d24a..a92272d 100644
 --- a/src/main/ipc.ts
 +++ b/src/main/ipc.ts
 @@ -28,6 +28,7 @@ import type {
@@ -25,8 +25,8 @@ index 81db3ee..1041a7c 100644
  	IpcOpenPathResult,
  	IpcPrefsGetPayload,
  	IpcPrefsSetPayload,
-@@ -935,6 +936,42 @@ export function registerIpcHandlers(deps: IpcDeps): void {
- 		return clipboard.readText();
+@@ -958,6 +959,42 @@ export function registerIpcHandlers(deps: IpcDeps): void {
+ 		}
  	});
  
 +	// Image zoom opens a real window rather than an in-app overlay: it can be
@@ -89,18 +89,9 @@ index 9554578..7e6eb36 100644
 +	}
  }
 diff --git a/src/preload/index.ts b/src/preload/index.ts
-index 2189a8e..eb6461b 100644
+index 5772ec4..e01f0d7 100644
 --- a/src/preload/index.ts
 +++ b/src/preload/index.ts
-@@ -3,7 +3,7 @@
-  * All RPC commands delegate to ipcRenderer.invoke(IPC_COMMANDS.RPC_COMMAND, ...).
-  * Event subscriptions return unsubscribe functions.
-  */
--import { contextBridge, ipcRenderer } from "electron";
-+import { contextBridge, ipcRenderer, webUtils } from "electron";
- import type {
- 	ConversationSearchResponse,
- 	CustomProviderInput,
 @@ -23,6 +23,7 @@ import type {
  	IpcFsReadPlanResult,
  	IpcFsReadResult,
@@ -109,11 +100,7 @@ index 2189a8e..eb6461b 100644
  	IpcOpenPathResult,
  	IpcSessionOpenNewWindowPayload,
  	IpcSessionOwner,
-@@ -314,9 +315,12 @@ const api: OmpApi = {
- 		showOpenDialog: (filters?: { name: string; extensions: string[] }[], options?: { directory?: boolean }) =>
- 			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_OPEN_DIALOG, filters, options),
- 		clipboardRead: () => ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_CLIPBOARD_READ),
-+		getPathForFile: (file: File) => webUtils.getPathForFile(file),
+@@ -323,6 +324,8 @@ const api: OmpApi = {
  		notify: (title: string, body?: string) => {
  			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_NOTIFY, { title, body });
  		},
@@ -123,7 +110,7 @@ index 2189a8e..eb6461b 100644
  
  	prefs: {
 diff --git a/src/renderer/components/chat/MessageBubble.tsx b/src/renderer/components/chat/MessageBubble.tsx
-index 02ae1ce..aa4b3d2 100644
+index 722368b..b049148 100644
 --- a/src/renderer/components/chat/MessageBubble.tsx
 +++ b/src/renderer/components/chat/MessageBubble.tsx
 @@ -47,7 +47,8 @@ function InlineImage({ image }: { image: ImageContent }) {
@@ -137,70 +124,42 @@ index 02ae1ce..aa4b3d2 100644
  	);
  }
 diff --git a/src/renderer/components/layout/InputArea.tsx b/src/renderer/components/layout/InputArea.tsx
-index 75a05bb..eeca95a 100644
+index 8e496ca..19cb941 100644
 --- a/src/renderer/components/layout/InputArea.tsx
 +++ b/src/renderer/components/layout/InputArea.tsx
-@@ -631,12 +631,37 @@ export function InputArea() {
+@@ -670,12 +670,26 @@ export function InputArea() {
  	};
  
  	const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
 -		const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/"));
--		if (files.length > 0) {
-+		const allFiles = Array.from(e.clipboardData.files);
-+		const images = allFiles.filter(f => f.type.startsWith("image/"));
-+		if (images.length > 0) {
++		const dropped = Array.from(e.clipboardData.files);
++		const files = dropped.filter(f => f.type.startsWith("image/"));
+ 		if (files.length > 0) {
  			e.preventDefault();
--			void Promise.all(files.map(fileToImage)).then(pasted => setImages(prev => [...prev, ...pasted]));
-+			void Promise.all(images.map(fileToImage)).then(pasted => setImages(prev => [...prev, ...pasted]));
+ 			void Promise.all(files.map(fileToImage)).then(pasted => setImages(prev => [...prev, ...pasted]));
  			return;
  		}
-+		// Copied file(s) (non-image): insert each absolute path as an @mention so
-+		// it renders inline and submits as a path. Windows Explorer sets no
-+		// text/plain for a file copy, so without this the paste is a no-op.
-+		if (allFiles.length > 0) {
-+			const paths = allFiles
-+				.map(f => window.omp.system.getPathForFile(f))
-+				.filter((p): p is string => p.length > 0);
-+			if (paths.length > 0) {
-+				e.preventDefault();
-+				const el = textareaRef.current;
-+				const start = el?.selectionStart ?? text.length;
-+				const end = el?.selectionEnd ?? start;
-+				const insert = paths.map(p => `@${p}`).join(" ") + " ";
-+				setText(current => `${current.slice(0, start)}${insert}${current.slice(end)}`);
-+				requestAnimationFrame(() => {
-+					const target = textareaRef.current;
-+					if (!target) return;
-+					target.focus();
-+					const caret = start + insert.length;
-+					target.setSelectionRange(caret, caret);
-+				});
-+				return;
-+			}
++		// Copied file(s): Explorer sets no text/plain for a file copy, so without
++		// this the paste is a no-op. Same path->@mention mapping as drag-and-drop.
++		const pastedMentions = dropped
++			.filter(f => !f.type.startsWith("image/"))
++			.map(f => window.omp.app.pathForFile(f))
++			.filter(filePath => filePath.length > 0)
++			.map(filePath => droppedFileMention(filePath, cwd));
++		if (pastedMentions.length > 0) {
++			e.preventDefault();
++			setText(current => appendMentions(current, pastedMentions));
++			requestAnimationFrame(() => textareaRef.current?.focus());
++			return;
 +		}
  		// Large TEXT paste (TUI editor.ts:1996-2044 parity): sanitize, then collapse
  		// to a `[Paste #N]` marker past the marker threshold; past the (separate,
  		// line-count-only) menu threshold, offer the inline/wrapped choice first.
-@@ -824,7 +849,13 @@ export function InputArea() {
- 											<img
- 												src={image.preview}
- 												alt={t("input.attachmentAlt", { index: index + 1 })}
--												className="h-16 w-16 rounded-lg border border-[var(--omp-border-muted)] object-cover"
-+												onDoubleClick={() =>
-+													void window.omp.system.openImageWindow({
-+														dataUrl: image.preview,
-+														title: t("input.attachmentAlt", { index: index + 1 }),
-+													})
-+												}
-+												className="h-16 w-16 cursor-zoom-in rounded-lg border border-[var(--omp-border-muted)] object-cover"
- 											/>
- 											<button
- 												type="button"
 diff --git a/src/shared/ipc-types.ts b/src/shared/ipc-types.ts
-index 2d2c938..4c15a10 100644
+index 413d362..f491d2d 100644
 --- a/src/shared/ipc-types.ts
 +++ b/src/shared/ipc-types.ts
-@@ -160,6 +160,8 @@ export const IPC_COMMANDS = {
+@@ -167,6 +167,8 @@ export const IPC_COMMANDS = {
  	SYSTEM_CLIPBOARD_READ: "system:clipboard-read",
  	/** Show notification */
  	SYSTEM_NOTIFY: "system:notify",
@@ -209,7 +168,7 @@ index 2d2c938..4c15a10 100644
  	/** Get GUI preferences */
  	PREFS_GET: "prefs:get",
  	/** Set GUI preferences */
-@@ -695,6 +697,13 @@ export interface IpcFsReadPlanPayload {
+@@ -708,6 +710,13 @@ export interface IpcFsReadPlanPayload {
  	localRoot: string | null;
  }
  
@@ -223,12 +182,9 @@ index 2d2c938..4c15a10 100644
  export interface IpcFsReadImagePayload {
  	/** Visible tab whose workspace resolves relative paths. */
  	tabId?: string;
-@@ -1389,7 +1398,11 @@ export interface OmpApi {
- 			options?: { directory?: boolean },
- 		): Promise<string[] | null>;
- 		clipboardRead(): Promise<string>;
-+		/** Absolute path of a clipboard/dropped File via Electron webUtils; "" when unavailable. */
-+		getPathForFile(file: File): string;
+@@ -1410,6 +1419,8 @@ export interface OmpApi {
+ 		/** Write a finished recording blob to the user-picked path. */
+ 		recorderSave(path: string, data: ArrayBuffer): Promise<{ ok: boolean; error?: string }>;
  		notify(title: string, body?: string): void;
 +		/** Show a data: image in a dedicated, resizable window. */
 +		openImageWindow(payload: IpcOpenImageWindowPayload): Promise<void>;
