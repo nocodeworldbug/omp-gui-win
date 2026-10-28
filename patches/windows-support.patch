@@ -116,7 +116,7 @@ index 3a0cad7..9890f23 100644
  	);
  }
 diff --git a/src/renderer/components/layout/InputArea.tsx b/src/renderer/components/layout/InputArea.tsx
-index 8e496ca..19cb941 100644
+index 8e496ca..c0308fc 100644
 --- a/src/renderer/components/layout/InputArea.tsx
 +++ b/src/renderer/components/layout/InputArea.tsx
 @@ -670,12 +670,26 @@ export function InputArea() {
@@ -147,6 +147,21 @@ index 8e496ca..19cb941 100644
  		// Large TEXT paste (TUI editor.ts:1996-2044 parity): sanitize, then collapse
  		// to a `[Paste #N]` marker past the marker threshold; past the (separate,
  		// line-count-only) menu threshold, offer the inline/wrapped choice first.
+@@ -869,7 +883,13 @@ export function InputArea() {
+ 											<img
+ 												src={image.preview}
+ 												alt={t("input.attachmentAlt", { index: index + 1 })}
+-												className="h-16 w-16 rounded-lg border border-[var(--omp-border-muted)] object-cover"
++												onDoubleClick={() =>
++													void window.omp.system.openImageWindow({
++														dataUrl: image.preview,
++														title: t("input.attachmentAlt", { index: index + 1 }),
++													})
++												}
++												className="h-16 w-16 cursor-zoom-in rounded-lg border border-[var(--omp-border-muted)] object-cover"
+ 											/>
+ 											<button
+ 												type="button"
 diff --git a/src/shared/ipc-types.ts b/src/shared/ipc-types.ts
 index fddf910..e14738e 100644
 --- a/src/shared/ipc-types.ts
