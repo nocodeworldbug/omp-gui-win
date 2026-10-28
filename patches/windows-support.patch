@@ -14,7 +14,7 @@ index d2303d5..da5a53c 100644
  # NO `electronLanguages` here on purpose: electron-builder's option compares the
  # list against Electron's `locales/*.pak` basenames with an EXACT match (after
 diff --git a/src/main/ipc.ts b/src/main/ipc.ts
-index 506d24a..a92272d 100644
+index e62a589..c947f22 100644
 --- a/src/main/ipc.ts
 +++ b/src/main/ipc.ts
 @@ -28,6 +28,7 @@ import type {
@@ -25,7 +25,7 @@ index 506d24a..a92272d 100644
  	IpcOpenPathResult,
  	IpcPrefsGetPayload,
  	IpcPrefsSetPayload,
-@@ -958,6 +959,42 @@ export function registerIpcHandlers(deps: IpcDeps): void {
+@@ -977,6 +978,42 @@ export function registerIpcHandlers(deps: IpcDeps): void {
  		}
  	});
  
@@ -69,10 +69,10 @@ index 506d24a..a92272d 100644
  		if (typeof payload.title === "string") {
  			// Dedupe within a window (a turn can emit the same notification from
 diff --git a/src/main/menu.ts b/src/main/menu.ts
-index 9554578..7e6eb36 100644
+index 3364ba2..9fceac6 100644
 --- a/src/main/menu.ts
 +++ b/src/main/menu.ts
-@@ -328,5 +328,14 @@ export function createMenu(windowManager: WindowManager, spawnWindow: SpawnWindo
+@@ -338,5 +338,14 @@ export function createMenu(windowManager: WindowManager, spawnWindow: SpawnWindo
  		},
  	];
  
@@ -89,31 +89,23 @@ index 9554578..7e6eb36 100644
 +	}
  }
 diff --git a/src/preload/index.ts b/src/preload/index.ts
-index 5772ec4..e01f0d7 100644
+index 6714abd..88f6ff5 100644
 --- a/src/preload/index.ts
 +++ b/src/preload/index.ts
-@@ -23,6 +23,7 @@ import type {
- 	IpcFsReadPlanResult,
- 	IpcFsReadResult,
- 	IpcMemoryChange,
-+	IpcOpenImageWindowPayload,
- 	IpcOpenPathResult,
- 	IpcSessionOpenNewWindowPayload,
- 	IpcSessionOwner,
-@@ -323,6 +324,8 @@ const api: OmpApi = {
+@@ -391,6 +391,8 @@ const api: OmpApi = {
+ 		clipboardRead: () => ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_CLIPBOARD_READ),
+ 		recorderSave: (path: string, data: ArrayBuffer) =>
+ 			ipcRenderer.invoke(IPC_COMMANDS.RECORDER_SAVE, { path, data }) as Promise<{ ok: boolean; error?: string }>,
++		openImageWindow: (payload: { dataUrl: string; title?: string }) =>
++			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_OPEN_IMAGE_WINDOW, payload),
  		notify: (title: string, body?: string) => {
  			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_NOTIFY, { title, body });
  		},
-+		openImageWindow: (payload: IpcOpenImageWindowPayload) =>
-+			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_OPEN_IMAGE_WINDOW, payload),
- 	},
- 
- 	prefs: {
 diff --git a/src/renderer/components/chat/MessageBubble.tsx b/src/renderer/components/chat/MessageBubble.tsx
-index 722368b..b049148 100644
+index 3a0cad7..9890f23 100644
 --- a/src/renderer/components/chat/MessageBubble.tsx
 +++ b/src/renderer/components/chat/MessageBubble.tsx
-@@ -47,7 +47,8 @@ function InlineImage({ image }: { image: ImageContent }) {
+@@ -61,7 +61,8 @@ function InlineImage({ image }: { image: ImageContent }) {
  		<img
  			src={src}
  			alt={t("chat.attachedImage")}
@@ -156,10 +148,10 @@ index 8e496ca..19cb941 100644
  		// to a `[Paste #N]` marker past the marker threshold; past the (separate,
  		// line-count-only) menu threshold, offer the inline/wrapped choice first.
 diff --git a/src/shared/ipc-types.ts b/src/shared/ipc-types.ts
-index 413d362..f491d2d 100644
+index fddf910..e14738e 100644
 --- a/src/shared/ipc-types.ts
 +++ b/src/shared/ipc-types.ts
-@@ -167,6 +167,8 @@ export const IPC_COMMANDS = {
+@@ -214,6 +214,8 @@ export const IPC_COMMANDS = {
  	SYSTEM_CLIPBOARD_READ: "system:clipboard-read",
  	/** Show notification */
  	SYSTEM_NOTIFY: "system:notify",
@@ -168,7 +160,7 @@ index 413d362..f491d2d 100644
  	/** Get GUI preferences */
  	PREFS_GET: "prefs:get",
  	/** Set GUI preferences */
-@@ -708,6 +710,13 @@ export interface IpcFsReadPlanPayload {
+@@ -802,6 +804,13 @@ export interface IpcFsReadPlanPayload {
  	localRoot: string | null;
  }
  
@@ -182,7 +174,7 @@ index 413d362..f491d2d 100644
  export interface IpcFsReadImagePayload {
  	/** Visible tab whose workspace resolves relative paths. */
  	tabId?: string;
-@@ -1410,6 +1419,8 @@ export interface OmpApi {
+@@ -1537,6 +1546,8 @@ export interface OmpApi {
  		/** Write a finished recording blob to the user-picked path. */
  		recorderSave(path: string, data: ArrayBuffer): Promise<{ ok: boolean; error?: string }>;
  		notify(title: string, body?: string): void;
