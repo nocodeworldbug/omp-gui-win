@@ -1,14 +1,24 @@
 diff --git a/packages/coding-agent/src/tools/browser/relay/bridge.ts b/packages/coding-agent/src/tools/browser/relay/bridge.ts
 --- a/packages/coding-agent/src/tools/browser/relay/bridge.ts
 +++ b/packages/coding-agent/src/tools/browser/relay/bridge.ts
-@@ -1183,6 +1183,20 @@
+@@ -847,6 +847,10 @@
+ 
+ 	async #handleCdpCommand(conn: CdpConnection, msg: CdpCommand): Promise<void> {
+ 		const sessionId = msg.sessionId;
++		if (sessionId === "relay-browser-session") {
++			await this.#handleBrowserCommand(conn, msg);
++			return;
++		}
+ 		if (!sessionId) {
+ 			await this.#handleBrowserCommand(conn, msg);
+ 			return;
+@@ -1183,6 +1187,19 @@
  			}
  			case "Target.setDiscoverTargets": {
  				conn.discover = true;
-+				// Puppeteer resolves its `Browser.target()` from discovered targets and throws
-+				// "Browser target is not found" when none has type "browser". Chrome announces
-+				// one during discovery; without this every downstream open() dies right
-+				// after Target.createTarget and the page is torn down again.
++				// Puppeteer resolves its `Browser.target()` from discovered targets and
++				// throws "Browser target is not found" when none has type "browser".
++				// Chrome announces one during discovery; the relay must do the same.
 +				this.#emit(conn, "Target.targetCreated", {
 +					targetInfo: {
 +						targetId: "relay-browser",
@@ -22,3 +32,27 @@ diff --git a/packages/coding-agent/src/tools/browser/relay/bridge.ts b/packages/
  				for (const tab of this.#tabs.values()) {
  					if (!this.#eligible(tab)) continue;
  					tab.announced = true;
+@@ -1217,6 +1234,23 @@
+ 				return;
+ 			}
+ 			case "Target.attachToTarget": {
++				if (msg.params?.targetId === "relay-browser") {
++					const sessionId = "relay-browser-session";
++					this.#emit(conn, "Target.attachedToTarget", {
++						sessionId,
++						targetInfo: {
++						targetId: "relay-browser",
++						type: "browser",
++						title: "",
++						url: "",
++						attached: true,
++						canAccessOpener: false,
++					},
++						waitingForDebugger: false,
++					});
++					this.#reply(conn, msg, { sessionId });
++					return;
++				}
+ 				const parsed = typeof msg.params?.targetId === "string" ? parseTargetId(msg.params.targetId) : null;
+ 				const tab = parsed ? this.#tabs.get(parsed.key) : undefined;
+ 				if (!parsed || !tab) {
