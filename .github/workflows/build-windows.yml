@@ -194,6 +194,25 @@ jobs:
           git -C "$RUNNER_TEMP/omp" checkout --quiet FETCH_HEAD
           git -C "$RUNNER_TEMP/omp" rev-parse HEAD
 
+      - name: Apply the agent patch layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Browser relay: announce a `browser` target during CDP discovery so
+          # Puppeteer's Browser.target() resolves. Without it every downstream
+          # open() dies with "Browser target is not found" right after
+          # Target.createTarget, and the page the GUI just created is torn down.
+          patch="$RUNNER_TEMP/agent-relay-browser-target.patch"
+          tr -d '\r' < "$GITHUB_WORKSPACE/patches/agent-relay-browser-target.patch" > "$patch"
+          wc -l "$patch"
+          if ! git -C "$RUNNER_TEMP/omp" -c core.autocrlf=false apply -v "$patch"; then
+            echo "agent patch application failed, diagnostics follow"
+            git -C "$RUNNER_TEMP/omp" --no-pager status --short | head -20
+            git -C "$RUNNER_TEMP/omp" apply --check -v "$patch" || true
+            exit 1
+          fi
+          git -C "$RUNNER_TEMP/omp" --no-pager diff --stat
+
       - name: Nest the GUI inside the monorepo
         shell: bash
         run: |

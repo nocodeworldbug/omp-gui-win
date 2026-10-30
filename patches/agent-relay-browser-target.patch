@@ -1,0 +1,24 @@
+diff --git a/packages/coding-agent/src/tools/browser/relay/bridge.ts b/packages/coding-agent/src/tools/browser/relay/bridge.ts
+--- a/packages/coding-agent/src/tools/browser/relay/bridge.ts
++++ b/packages/coding-agent/src/tools/browser/relay/bridge.ts
+@@ -1183,6 +1183,20 @@
+ 			}
+ 			case "Target.setDiscoverTargets": {
+ 				conn.discover = true;
++				// Puppeteer resolves its `Browser.target()` from discovered targets and throws
++				// "Browser target is not found" when none has type "browser". Chrome announces
++				// one during discovery; without this every downstream open() dies right
++				// after Target.createTarget and the page is torn down again.
++				this.#emit(conn, "Target.targetCreated", {
++					targetInfo: {
++						targetId: "relay-browser",
++						type: "browser",
++						title: "",
++						url: "",
++						attached: true,
++						canAccessOpener: false,
++					},
++				});
+ 				for (const tab of this.#tabs.values()) {
+ 					if (!this.#eligible(tab)) continue;
+ 					tab.announced = true;
