@@ -101,20 +101,6 @@ index 6714abd..88f6ff5 100644
  		notify: (title: string, body?: string) => {
  			ipcRenderer.invoke(IPC_COMMANDS.SYSTEM_NOTIFY, { title, body });
  		},
-diff --git a/src/renderer/components/chat/MessageBubble.tsx b/src/renderer/components/chat/MessageBubble.tsx
-index 3a0cad7..9890f23 100644
---- a/src/renderer/components/chat/MessageBubble.tsx
-+++ b/src/renderer/components/chat/MessageBubble.tsx
-@@ -61,7 +61,8 @@ function InlineImage({ image }: { image: ImageContent }) {
- 		<img
- 			src={src}
- 			alt={t("chat.attachedImage")}
--			className="my-1 max-h-48 max-w-64 rounded-md border border-[var(--omp-border-muted)] object-contain"
-+			onDoubleClick={() => void window.omp.system.openImageWindow({ dataUrl: src })}
-+			className="my-1 max-h-48 max-w-64 cursor-zoom-in rounded-md border border-[var(--omp-border-muted)] object-contain"
- 		/>
- 	);
- }
 diff --git a/src/renderer/components/layout/InputArea.tsx b/src/renderer/components/layout/InputArea.tsx
 index 8e496ca..c0308fc 100644
 --- a/src/renderer/components/layout/InputArea.tsx
